@@ -38,19 +38,19 @@ contract RedeemEscrow is IRedeemEscrow, MonetrixGovernedUpgradeable {
 
 
     /// @notice Record a new redemption obligation. Called by Vault during requestRedeem.
-    function addObligation(uint256 amount) external onlyVault {
+    function addObligation(uint256 amount) external onlyVault { 
         totalOwed += amount;
         emit ObligationAdded(amount, totalOwed);
     }
 
     /// @notice Pay USDC to a redeem claimant and reduce obligation.
-    function payOut(address recipient, uint256 amount) external onlyVault {
+    function payOut(address recipient, uint256 amount) external onlyVault {//💰 Send USDC to the user and update accounting
         require(amount > 0, "RedeemEscrow: zero amount");
         require(usdc.balanceOf(address(this)) >= amount, "RedeemEscrow: insufficient liquidity");
-        totalOwed -= amount;
-        usdc.safeTransfer(recipient, amount);
+        totalOwed -= amount;//📉 “We owe less now”
+        usdc.safeTransfer(recipient, amount);//👤 the person who will receive USDC
         emit PaidOut(recipient, amount);
-    }
+    }//*Done 
 
     /// @notice Reclaim excess USDC back to a target address (typically vault).
     /// @dev Enforces that pending redemption obligations stay fully collateralized —
@@ -64,10 +64,10 @@ contract RedeemEscrow is IRedeemEscrow, MonetrixGovernedUpgradeable {
         emit Reclaimed(to, amount);
     }
 
-    function shortfall() external view returns (uint256) {
-        uint256 bal = usdc.balanceOf(address(this));
-        return totalOwed > bal ? totalOwed - bal : 0;
-    }
+    function shortfall() external view returns (uint256) {//This function calculates how much USDC is missing to pay users.
+        uint256 bal = usdc.balanceOf(address(this));//👉 How much USDC is currently available
+        return totalOwed > bal ? totalOwed - bal : 0;//If protocol owes more than it has → return missing amount
+    }//*Done
 
     function balance() external view returns (uint256) {
         return usdc.balanceOf(address(this));

@@ -34,7 +34,7 @@ import {MonetrixGovernedUpgradeable} from "../governance/MonetrixGovernedUpgrade
 contract MonetrixVault is PausableUpgradeable, ReentrancyGuard, MonetrixGovernedUpgradeable {
     using SafeERC20 for IERC20;
 
-    enum BridgeTarget { Vault, Multisig }
+    enum BridgeTarget { Vault, Multisig }//👉 This decides where bridged money should go on L1 side:,,,bridge USDC → either stays in system or goes to admin backup wallet
 
     // ═══════════════════════════════════════════════════════════
     //                      STATE
@@ -42,23 +42,23 @@ contract MonetrixVault is PausableUpgradeable, ReentrancyGuard, MonetrixGoverned
 
     // ─── Core references ────────────────────────────────────
     IERC20 public usdc;
-    USDM public usdm;
-    sUSDM public susdm;
-    MonetrixConfig public config;
-    address public coreDepositWallet;
-    address public accountant;
-    address public multisigVault;
-    address public redeemEscrow;
-    address public yieldEscrow;
+    USDM public usdm;//👉 This is the protocol’s “receipt token” minted 1:1 when user deposits USDC.
+    sUSDM public susdm;//👉 This is the staking version of USDM that earns yield.//stake USDM → earn profit over time
+    MonetrixConfig public config;//👉 This stores all protocol rules like:
+    address public coreDepositWallet;//👉 This is the bridge gateway that sends funds to L1 trading system.//“door to external trading system”
+    address public accountant;//👉 This is the “brain” that calculates://decides how much profit protocol made today
+    address public multisigVault;//👉 Backup admin-controlled wallet used for emergency or alternative fund routing.//if system fails → money can go here
+    address public redeemEscrow;//👉 Holds user withdrawal requests (locked pending USDC).//user requests withdraw → stored here until paid
+    address public yieldEscrow;//👉 Temporary storage for generated profit before distribution.//👉 Temporary storage for generated profit before distribution.
 
     // ─── Operational state ──────────────────────────────────
-    bool public hlpDepositEnabled;
-    bool public multisigVaultEnabled;
-    uint256 public lastBridgeTimestamp;
+    bool public hlpDepositEnabled;// 👉 HLP = Hyperliquid Liquidity Pool// 🏦 A pool where you deposit funds → traders use it → you earn fees//👉 Controls whether users/system can deposit into HLP strategy.//true → system sends money to trading pool,,false → HLP strategy paused//“turn ON/OFF earning strategy”
+    bool public multisigVaultEnabled;//👉 Allows routing funds to multisig wallet,,“backup money routing switch”
+    uint256 public lastBridgeTimestamp;//👉 Last time funds were sent to L1.
 
     // ─── L1 principal tracking ───────────────────────────────
-    uint256 public outstandingL1Principal;
-    uint256 public bridgeRetentionAmount;
+    uint256 public outstandingL1Principal;//👉 Total money currently sent to L1 (active in trading).
+    uint256 public bridgeRetentionAmount;//👉 Minimum amount kept in vault (don’t send everything to L1).
 
     // ─── Redeem queue ───────────────────────────────────────
     /// @dev 2-slot layout without exotic bit widths. `owner` (160 bits) +
@@ -66,30 +66,30 @@ contract MonetrixVault is PausableUpgradeable, ReentrancyGuard, MonetrixGoverned
     ///      takes the full uint256 slot 1 — same storage cost as the former
     ///      uint152/uint104 packing, but no truncation risk on usdmAmount.
     struct RedeemRequest {
-        address owner;        // slot 0 ┐
-        uint64  cooldownEnd;  // slot 0 ┘
-        uint256 usdmAmount;   // slot 1
+        address owner;        // slot 0 ┐//owner → who requested
+        uint64  cooldownEnd;  // slot 0 ┘///cooldownEnd → when they can claim
+        uint256 usdmAmount;   // slot 1//usdmAmount → how much to withdraw
     }
 
-    uint256 public nextRedeemId;
-    mapping(uint256 => RedeemRequest) public redeemRequests;
-    mapping(address => uint256[]) private _userRedeemIds;
+    uint256 public nextRedeemId;//👉 Counter to give unique ID for each withdraw request.
+    mapping(uint256 => RedeemRequest) public redeemRequests;//👉 Stores all withdraw requests by ID.
+    mapping(address => uint256[]) private _userRedeemIds;//👉 Tracks which requests belong to each user.
 
     /// @notice PM activation flag for Vault's L1 account; when true, `_sendL1Bridge` counts 0x811 supplied.
-    bool public pmEnabled;
+    bool public pmEnabled;//Instead of keeping funds separate, the system treats all assets as one combined portfolio           //note
 
     /// @notice Operator-side pause (independent of `paused`). When true, blocks every operator-driven
     ///         mutation (hedge/HLP/BLP/bridges/yield/escrow routing). User-facing functions keep
     ///         their own `whenNotPaused` gate and are unaffected.
-    bool public operatorPaused;
+    bool public operatorPaused;//👉 Stops all operator actions (hedge, bridge, yield).
 
     uint256[50] private __gap;
 
     // ─── Events ─────────────────────────────────────────────
     event Deposited(address indexed user, uint256 amount);
-    event RedeemRequested(uint256 indexed requestId, address indexed owner, uint256 usdmAmount, uint256 cooldownEnd);
-    event RedeemClaimed(uint256 indexed requestId, address indexed owner, uint256 usdmAmount);
-    event BridgedToL1(uint256 amount);
+    event RedeemRequested(uint256 indexed requestId, address indexed owner, uint256 usdmAmount, uint256 cooldownEnd);//👉 Logs when user requests withdrawal (starts cooldown)
+    event RedeemClaimed(uint256 indexed requestId, address indexed owner, uint256 usdmAmount);//👉 Logs when user actually receives money after cooldown
+    event BridgedToL1(uint256 amount);//👉 Logs when vault sends funds to L1 for trading
     event PrincipalBridgedFromL1(uint256 amount);
     event YieldBridgedFromL1(uint256 amount);
     event YieldCollected(uint256 amount);
@@ -101,19 +101,19 @@ contract MonetrixVault is PausableUpgradeable, ReentrancyGuard, MonetrixGoverned
     event HlpWithdrawn(uint64 usdAmount);
     event HlpDepositEnabledUpdated(bool enabled);
     event RedemptionsFunded(uint256 amount);
-    event RedeemEscrowReclaimed(uint256 amount);
+    event RedeemEscrowReclaimed(uint256 amount);//“Unused withdrawal funds are returned from escrow to the vault.”
     event EmergencyActionSent(address indexed sender, bytes32 dataHash);
-    event AccountantUpdated(address newAccountant);
+    event AccountantUpdated(address newAccountant);//“Logs when the system replaces the PnL calculation contract.”
     event MultisigVaultUpdated(address newMultisigVault);
     event RedeemEscrowUpdated(address redeemEscrow);
     event YieldEscrowUpdated(address yieldEscrow);
-    event BridgeRetentionAmountUpdated(uint256 amount);
-    event PmEnabledUpdated(bool enabled);
-    event BlpSupplied(uint64 indexed token, uint64 l1Amount);
-    event BlpWithdrawn(uint64 indexed token, uint64 l1Amount);
+    event BridgeRetentionAmountUpdated(uint256 amount);//💼 900,000 → invested (loans, bonds, etc.),,🏦 100,000 → kept in vault (retention)
+    event PmEnabledUpdated(bool enabled);//👉 Logs when portfolio margin mode toggled
+    event BlpSupplied(uint64 indexed token, uint64 l1Amount);//👉 Logs when vault supplies tokens to lending pool
+    event BlpWithdrawn(uint64 indexed token, uint64 l1Amount);//👉 Logs when vault withdraws from lending pool
     event OperatorPaused(address indexed by);
     event OperatorUnpaused(address indexed by);
-
+ 
 
 
     // ═══════════════════════════════════════════════════════════
@@ -127,11 +127,11 @@ contract MonetrixVault is PausableUpgradeable, ReentrancyGuard, MonetrixGoverned
 
     function initialize(
         address _usdc,
-        address _usdm,
-        address _susdm,
-        address _config,
-        address _coreDepositWallet,
-        address _acl
+        address _usdm,//👉 Address of USDM (minted stablecoin)
+        address _susdm,//👉 Address of yield token (earning version)
+        address _config,//👉 Address of config contract (rules/settings)
+        address _coreDepositWallet,//👉 Address used to send funds to L1 trading system
+        address _acl//👉 Access control contract (roles: operator, governor, etc.)
     ) external initializer {
         require(_usdc != address(0) && _usdm != address(0) && _susdm != address(0), "zero token");
         require(_config != address(0) && _coreDepositWallet != address(0), "zero dep");
@@ -165,52 +165,55 @@ contract MonetrixVault is PausableUpgradeable, ReentrancyGuard, MonetrixGoverned
     // ═══════════════════════════════════════════════════════════
     //                   USER OPERATIONS
     // ═══════════════════════════════════════════════════════════
-
-    function deposit(uint256 amount) external nonReentrant whenNotPaused {
+//@audit-ok 
+    function deposit(uint256 amount) external nonReentrant whenNotPaused {//User gives USDC → gets USDM
         require(
-            amount >= config.minDepositAmount() && amount <= config.maxDepositAmount(),
+            amount >= config.minDepositAmount() && amount <= config.maxDepositAmount(),// @audit access control cheack?
             "deposit out of range"
         );
-        uint256 maxTVL = config.maxTVL();
+        uint256 maxTVL = config.maxTVL();//👉 Get maximum total money allowed in protocol
         if (maxTVL > 0) {
-            require(usdm.totalSupply() + amount <= maxTVL, "TVL cap exceeded");
+            require(usdm.totalSupply() + amount <= maxTVL, "TVL cap exceeded");//👉 Ensures total deposits don’t exceed system limit
         }
         usdc.safeTransferFrom(msg.sender, address(this), amount);
         usdm.mint(msg.sender, amount);
         emit Deposited(msg.sender, amount);
     }
-
-    function requestRedeem(uint256 usdmAmount) external nonReentrant whenNotPaused requireWired returns (uint256 requestId) {
+  //@audit F6. Stale request state risk,,👉 request exists but system state changed (config/escrow mismatch)
+  // @audit Partial execution possible?
+   // @audit USDM is always redeemable 1:1
+    // @audit Can I create imbalance (owed vs liquidity)?
+    //@audit-ok 
+       function requestRedeem(uint256 usdmAmount) external nonReentrant whenNotPaused requireWired returns (uint256 requestId) {//User says: “I want my money back” (but not instantly)//👉 User requests to withdraw using USDM
         require(usdmAmount > 0, "zero amount");
-        IERC20(address(usdm)).safeTransferFrom(msg.sender, address(this), usdmAmount);
-        IRedeemEscrow(redeemEscrow).addObligation(usdmAmount);
+        IERC20(address(usdm)).safeTransferFrom(msg.sender, address(this), usdmAmount);//👉 User sends USDM → vault,,User is giving back their claim token
+        IRedeemEscrow(redeemEscrow).addObligation(usdmAmount);//“Protocol now owes this amount to users
 
-        requestId = nextRedeemId++;
+        requestId = nextRedeemId++;//👉 Unique ID for this withdrawal
         redeemRequests[requestId] = RedeemRequest({
-            owner: msg.sender,
-            cooldownEnd: SafeCast.toUint64(block.timestamp + config.redeemCooldown()),
-            usdmAmount: usdmAmount
+            owner: msg.sender,///who → user
+            cooldownEnd: SafeCast.toUint64(block.timestamp + config.redeemCooldown())// 👉 “Set the time when user can withdraw”//config.redeemCooldown()👉 Waiting time (redeemCooldown = 3 days;)//SafeCast.toUint64(...)👉 Convert the value to uint64 safely(avoid overflow / fit into smaller storage)
         });
-        _userRedeemIds[msg.sender].push(requestId);
+        _userRedeemIds[msg.sender].push(requestId);//👉 Link this request to user
         emit RedeemRequested(requestId, msg.sender, usdmAmount, block.timestamp + config.redeemCooldown());
     }
-
-    function claimRedeem(uint256 requestId) external nonReentrant whenNotPaused requireWired {
-        RedeemRequest memory req = redeemRequests[requestId];
+//@audit-ok 
+    function claimRedeem(uint256 requestId) external nonReentrant whenNotPaused requireWired {//User finally gets USDC after waiting
+        RedeemRequest memory req = redeemRequests[requestId];//👉 User claims their withdrawal using request ID
         require(
             req.usdmAmount > 0
                 && msg.sender == req.owner
                 && block.timestamp >= req.cooldownEnd,
             "invalid claim"
         );
-        uint256 amount = req.usdmAmount;
-        delete redeemRequests[requestId];
-        _removeUserRedeemId(req.owner, requestId);
-
-        usdm.burn(amount);
-        IRedeemEscrow(redeemEscrow).payOut(msg.sender, amount);
-        emit RedeemClaimed(requestId, msg.sender, amount);
-    }
+        uint256 amount = req.usdmAmount;//👉 Store how much to pay
+        delete redeemRequests[requestId];//👉 Remove request (cannot reuse)
+        _removeUserRedeemId(req.owner, requestId);//👉 Clean user’s request tracking
+ // @audit why we burn again we delate requestId
+        usdm.burn(amount);//👉 Destroy user's claim token  User is no longer claiming money
+        IRedeemEscrow(redeemEscrow).payOut(msg.sender, amount);//👉 Escrow sends real USDC to user
+        emit RedeemClaimed(requestId, msg.sender, amount);//👉 Log withdrawal
+    }//*Done
 
     // ═══════════════════════════════════════════════════════════
     //                 OPERATOR OPERATIONS
@@ -220,9 +223,9 @@ contract MonetrixVault is PausableUpgradeable, ReentrancyGuard, MonetrixGoverned
     // NOTE: Once the vault contract account supports Portfolio Margin,
     // all positions will be held by the vault directly and multisigVault
     // will be disabled.
-    function keeperBridge(BridgeTarget target) external onlyOperator requireWired whenNotPaused whenOperatorNotPaused {
-        require(block.timestamp >= lastBridgeTimestamp + config.bridgeInterval(), "too early");
-        uint256 amount = netBridgeable();
+    function keeperBridge(BridgeTarget target) external onlyOperator requireWired whenNotPaused whenOperatorNotPaused {//This function sends USDC from this vault (EVM side) to L1 for trading/hedging.
+        require(block.timestamp >= lastBridgeTimestamp + config.bridgeInterval(), "too early");// 👉 Prevents too frequent bridging       bridgeInterval = 6 hours;
+        uint256 amount = netBridgeable();//👉 Calculates how much USDC is free to send ,,,👉 Example: Vault has 1000 USDC, 300 reserved → send 700
         require(amount > 0, "nothing to bridge");
         address recipient = (target == BridgeTarget.Multisig && multisigVaultEnabled && multisigVault != address(0))
             ? multisigVault
@@ -233,7 +236,6 @@ contract MonetrixVault is PausableUpgradeable, ReentrancyGuard, MonetrixGoverned
         ICoreDepositWallet(coreDepositWallet).depositFor(recipient, amount, HyperCoreConstants.SPOT_DEX);
         emit BridgedToL1(amount);
     }
-
     function bridgePrincipalFromL1(uint256 amount) external onlyOperator requireWired whenOperatorNotPaused {
         require(
             amount > 0 && amount <= redemptionShortfall() && amount <= outstandingL1Principal,
@@ -556,14 +558,14 @@ contract MonetrixVault is PausableUpgradeable, ReentrancyGuard, MonetrixGoverned
         }
     }
 
-    function _removeUserRedeemId(address user, uint256 requestId) private {
-        uint256[] storage ids = _userRedeemIds[user];
-        uint256 len = ids.length;
-        for (uint256 i = 0; i < len; i++) {
-            if (ids[i] == requestId) {
-                ids[i] = ids[len - 1];
-                ids.pop();
-                return;
+    function _removeUserRedeemId(address user, uint256 requestId) private {//Remove a request ID from user’s list
+        uint256[] storage ids = _userRedeemIds[user];//👉 Get the list of all redeem requests for this user
+        uint256 len = ids.length;//👉 Get total number of requests
+        for (uint256 i = 0; i < len; i++) {//👉 Loop through all request IDs
+            if (ids[i] == requestId) {//👉 Find the matching request ID
+                ids[i] = ids[len - 1];//Replace with last → [5, 12, 12] =[5, 12]//👉 Order is NOT preserved
+                ids.pop();//👉 Remove the last element
+                return;//👉 Stop after removal
             }
         }
     }
@@ -572,12 +574,12 @@ contract MonetrixVault is PausableUpgradeable, ReentrancyGuard, MonetrixGoverned
     //                       VIEW
     // ═══════════════════════════════════════════════════════════
 
-    function netBridgeable() public view returns (uint256) {
-        uint256 bal = usdc.balanceOf(address(this));
-        uint256 sf = IRedeemEscrow(redeemEscrow).shortfall();
-        uint256 reserved = sf + bridgeRetentionAmount;
-        return bal > reserved ? bal - reserved : 0;
-    }
+    function netBridgeable() public view returns (uint256) {//This function calculates how much USDC is safe to send to L1 (after keeping required reserves).
+        uint256 bal = usdc.balanceOf(address(this));//👉 Get total USDC in the vault,,Vault = 1000 USDC
+        uint256 sf = IRedeemEscrow(redeemEscrow).shortfall();//👉 sf = shortfall (missing money),, “Protocol-এর কাছে এখন 300 USDC কম আছে users-দের দিতে”  //balance = 1000 , shortfall = 300 ,  retention = 100
+        uint256 reserved = sf + bridgeRetentionAmount;//reserved = 300 + 100 = 400
+        return bal > reserved ? bal - reserved : 0;//bal > reserved ?1000 > 400 → YES  ,,return 1000 - 400 = 600
+    }//*Done
 
     function redemptionShortfall() public view returns (uint256) {
         if (redeemEscrow == address(0)) return 0;
