@@ -227,24 +227,24 @@ contract MonetrixVault is PausableUpgradeable, ReentrancyGuard, MonetrixGoverned
         require(block.timestamp >= lastBridgeTimestamp + config.bridgeInterval(), "too early");// 👉 Prevents too frequent bridging       bridgeInterval = 6 hours;
         uint256 amount = netBridgeable();//👉 Calculates how much USDC is free to send ,,,👉 Example: Vault has 1000 USDC, 300 reserved → send 700
         require(amount > 0, "nothing to bridge");
-        address recipient = (target == BridgeTarget.Multisig && multisigVaultEnabled && multisigVault != address(0))
-            ? multisigVault
-            : address(this);
-        outstandingL1Principal += amount;
-        lastBridgeTimestamp = block.timestamp;
-        usdc.forceApprove(coreDepositWallet, amount);
-        ICoreDepositWallet(coreDepositWallet).depositFor(recipient, amount, HyperCoreConstants.SPOT_DEX);
-        emit BridgedToL1(amount);
+        address recipient = (target == BridgeTarget.Multisig && multisigVaultEnabled && multisigVault != address(0))//“L1-এ টাকা যাবে কোথায়?”//1️⃣ target == BridgeTarget.Multisig 👉 operator manually বলছে:“আমি multisig-এ পাঠাতে চাই” ,,2️⃣ multisigVaultEnabled 👉 protocol allow করছে কিনা ,,3️⃣ multisigVault != address(0) 👉 address valid কিনা//recipient = 0xABC  👉 টাকা যাবে multisig wallet-এ
+            ? multisigVault//“Multisig ঠিক থাকলে → ওখানে পাঠাও
+            : address(this);//না হলে → নিজের contract-এই রাখো”
+        outstandingL1Principal += amount;//“L1-এ কত টাকা পাঠানো হয়েছে (active trading money) — সেটা track করা”
+        lastBridgeTimestamp = block.timestamp;//“শেষ কবে bridge করা হয়েছে — future cooldown check এর জন্য”
+        usdc.forceApprove(coreDepositWallet, amount);//Vault → permission দিচ্ছে coreDepositWallet-কে যেন সে USDC নিতে পারে
+        ICoreDepositWallet(coreDepositWallet).depositFor(recipient, amount, HyperCoreConstants.SPOT_DEX);// SPOT_DEX = Spot trading system  “এই fund spot trading (buy/sell) এর জন্য”//এখন actually টাকা পাঠানো হচ্ছে L1 system-এ
+        emit BridgedToL1(amount);  
     }
-    function bridgePrincipalFromL1(uint256 amount) external onlyOperator requireWired whenOperatorNotPaused {
+    function bridgePrincipalFromL1(uint256 amount) external onlyOperator requireWired whenOperatorNotPaused {//👉 L1 (trading side) থেকে যতটুকু দরকার ততটুকু USDC Vault-এ ফিরিয়ে আনা//Vault balance = 200 USDC,,Users withdraw চায় = 500 USDC,,👉 shortfall = 300,,L1-এ আছে = 700 USDC
         require(
-            amount > 0 && amount <= redemptionShortfall() && amount <= outstandingL1Principal,
+            amount > 0 && amount <= redemptionShortfall() && amount <= outstandingL1Principal,//কারণ: দরকার 300, তুমি আনতে চাচ্ছ 400,,❌ Case 2 (L1-এ এত নাই)amount = 800 L1 = 700  👉 ❌ FAIL
             "invalid bridge amount"
         );
-        outstandingL1Principal -= amount;
-        _sendL1Bridge(amount);
+        outstandingL1Principal -= amount;//“L1-এ এখন কম টাকা আছে”
+        _sendL1Bridge(amount);//L1 system → Vault-এ USDC পাঠায়
         emit PrincipalBridgedFromL1(amount);
-    }
+    }//*Done
 
     function bridgeYieldFromL1(uint256 amount) external onlyOperator requireWired whenOperatorNotPaused {
         require(amount > 0, "zero amount");
@@ -529,17 +529,17 @@ contract MonetrixVault is PausableUpgradeable, ReentrancyGuard, MonetrixGoverned
     // ═══════════════════════════════════════════════════════════
 
     /// @dev Checks L1 USDC (spot + supplied when PM on) covers `amount` before SEND_ASSET; avoids silent L1 drop when hedge is still locked.
-    function _sendL1Bridge(uint256 amount) internal {
-        uint64 usdcToken = uint64(HyperCoreConstants.USDC_TOKEN_INDEX);
-        uint256 l1Available = uint256(PrecompileReader.spotBalance(address(this), usdcToken).total);
-        if (pmEnabled) {
-            l1Available += uint256(PrecompileReader.suppliedBalance(address(this), usdcToken));
-        }
+    function _sendL1Bridge(uint256 amount) internal {// ❗ এই function verify করে:,,“L1-এ সত্যি এই amount আছে তো?”
+        uint64 usdcToken = uint64(HyperCoreConstants.USDC_TOKEN_INDEX);//“L1 system-এ USDC কোন token index-এ আছে সেটা নাও”,,এটা একটা constant value (library থেকে আসছে),,USDC_TOKEN_INDEX = 1;,,👉 এখানে token address use করে না
+        uint256 l1Available = uint256(PrecompileReader.spotBalance(address(this), usdcToken).total);//Vault-এর L1 account-এ direct USDC balance কত আছে,, Spot balance = 700 USDC//👉 “L1-এ আসলে enough USDC আছে কিনা check করে তারপর bridge করো”
+        if (pmEnabled) {//collateral count হবে কিনা 👉 যদি Portfolio Margin ON থাকে: ,,usable = spot + supplied,,usable = spot only,, //👉 না থাকলে:usable = spot only            //👉 suppliedBalance normally locked collateral
+            l1Available += uint256(PrecompileReader.suppliedBalance(address(this), usdcToken));//✅ PM ON ->l1Available = 300 + 400 = 700
+        } 
         require(
-            l1Available >= TokenMath.usdcEvmToL1Wei(amount),
-            "L1 USDC insufficient (unwind hedge or wait for settlement)"
+            l1Available >= TokenMath.usdcEvmToL1Wei(amount),//👉 “তুমি যত amount bridge করতে চাও…”,, 👉 “L1-এ available amount ≥ সেই amount হতে হবে”
+            "L1 USDC insufficient (unwind hedge or wait for settlement)"//“L1-এ enough free USDC নাই”
         );
-        ActionEncoder.sendBridgeToL1(amount);
+        ActionEncoder.sendBridgeToL1(amount);//👉 এখন actual bridge call হচ্ছে
     }
 
     /// @dev `spotAsset` is the HL limit-order asset for the spot leg (= 10000 + pair_index),
@@ -576,9 +576,9 @@ contract MonetrixVault is PausableUpgradeable, ReentrancyGuard, MonetrixGoverned
 
     function netBridgeable() public view returns (uint256) {//This function calculates how much USDC is safe to send to L1 (after keeping required reserves).
         uint256 bal = usdc.balanceOf(address(this));//👉 Get total USDC in the vault,,Vault = 1000 USDC
-        uint256 sf = IRedeemEscrow(redeemEscrow).shortfall();//👉 sf = shortfall (missing money),, “Protocol-এর কাছে এখন 300 USDC কম আছে users-দের দিতে”  //balance = 1000 , shortfall = 300 ,  retention = 100
-        uint256 reserved = sf + bridgeRetentionAmount;//reserved = 300 + 100 = 400
-        return bal > reserved ? bal - reserved : 0;//bal > reserved ?1000 > 400 → YES  ,,return 1000 - 400 = 600
+        uint256 sf = IRedeemEscrow(redeemEscrow).shortfall();//👉 sf = shortfall (missing money),, “Protocol-এর কাছে এখন 200 USDC কম আছে users-দের দিতে”  //balance = 1000 , shortfall = 200 ,  retention = 100
+        uint256 reserved = sf + bridgeRetentionAmount;//reserved = 200 + 100 = 300
+        return bal > reserved ? bal - reserved : 0;//bal > reserved ?1000 > 300 → YES  ,,return 1000 - 300 = 700
     }//*Done
 
     function redemptionShortfall() public view returns (uint256) {
