@@ -246,10 +246,10 @@ contract MonetrixVault is PausableUpgradeable, ReentrancyGuard, MonetrixGoverned
         emit PrincipalBridgedFromL1(amount);
     }//*Done
 
-    function bridgeYieldFromL1(uint256 amount) external onlyOperator requireWired whenOperatorNotPaused {
+    function bridgeYieldFromL1(uint256 amount) external onlyOperator requireWired whenOperatorNotPaused {//Bring profit (yield) from L1 → back to vault (EVM).
         require(amount > 0, "zero amount");
-        require(amount <= yieldShortfall(), "yield shortfall");
-        _sendL1Bridge(amount);
+        require(amount <= yieldShortfall(), "yield shortfall");//তুমি যত নিতে চাও ≤ available yield//এখনো L1 এ থাকা yield (remaining profit)
+        _sendL1Bridge(amount);//L1 → Vault USDC transfer
         emit YieldBridgedFromL1(amount);
     }
 
@@ -540,7 +540,7 @@ contract MonetrixVault is PausableUpgradeable, ReentrancyGuard, MonetrixGoverned
             "L1 USDC insufficient (unwind hedge or wait for settlement)"//“L1-এ enough free USDC নাই”
         );
         ActionEncoder.sendBridgeToL1(amount);//👉 এখন actual bridge call হচ্ছে
-    }
+    }//*Done
 
     /// @dev `spotAsset` is the HL limit-order asset for the spot leg (= 10000 + pair_index),
     ///      NOT the token_index. See `MonetrixConfig.TradeableAsset` for the distinction.
@@ -586,16 +586,16 @@ contract MonetrixVault is PausableUpgradeable, ReentrancyGuard, MonetrixGoverned
         return IRedeemEscrow(redeemEscrow).shortfall();
     }
 
-    function yieldShortfall() public view returns (uint256) {
+    function yieldShortfall() public view returns (uint256) {//(মানে: কত profit এখনো L1 এ পড়ে আছে)
         if (accountant == address(0)) return 0;
-        int256 s = IMonetrixAccountant(accountant).surplus();
-        if (s <= 0) return 0;
-        uint256 yield = uint256(s);
-        uint256 vaultBal = usdc.balanceOf(address(this));
-        uint256 res = IRedeemEscrow(redeemEscrow).shortfall() + bridgeRetentionAmount;
-        uint256 available = vaultBal > res ? vaultBal - res : 0;
-        return yield > available ? yield - available : 0;
-    }
+        int256 s = IMonetrixAccountant(accountant).surplus();//int256 s = IMonetrixAccountant(accountant).surplus();
+        if (s <= 0) return 0;//👉 profit নাই → return 0
+        uint256 yield = uint256(s);//👉 surplus → yield হিসেবে treat করা
+        uint256 vaultBal = usdc.balanceOf(address(this));//👉 Vault এ current USDC
+        uint256 res = IRedeemEscrow(redeemEscrow).shortfall() + bridgeRetentionAmount;//👉 reserved amount:,,  shortfall = users withdraw pending,,retention = minimum reserve
+        uint256 available = vaultBal > res ? vaultBal - res : 0;//👉 Vault থেকে usable USDC: available = vaultBal - reserved
+        return yield > available ? yield - available : 0;//yieldShortfall = total yield - already available in vault
+    }//*Done
 
 
 

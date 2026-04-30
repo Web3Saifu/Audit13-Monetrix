@@ -114,9 +114,9 @@ contract MonetrixAccountant is IMonetrixAccountant, MonetrixGovernedUpgradeable 
     /// @notice Signed per-USDM backing. YieldEscrow (in-transit yield) and
     ///         InsuranceFund (ring-fenced reserve) are excluded by design.
     /// @dev Mark-to-market; signed so a liquidated perp account reduces backing.
-    function totalBackingSigned() public view returns (int256 total) {
+    function totalBackingSigned() public view returns (int256 total) {//👉 “Protocol এর total real value (EVM + L1)”
         // EVM USDC — Vault + RedeemEscrow (not YieldEscrow: undistributed yield is not backing)
-        total = int256(usdc.balanceOf(vault));
+        total = int256(usdc.balanceOf(vault));//👉 Vault এ যত USDC আছে → add
         address re = IMonetrixVaultReader(vault).redeemEscrow();
         if (re != address(0)) {
             total += int256(usdc.balanceOf(re));
@@ -138,7 +138,7 @@ contract MonetrixAccountant is IMonetrixAccountant, MonetrixGovernedUpgradeable 
     function _readL1Backing(address account, SuppliedAsset[] storage suppliedList)
         internal view returns (int256 total)
     {
-        total = _readPerpAccountValueSigned(account);
+        total = _readPerpAccountValue Signed(account);
 
         // L1 spot USDC (idle cash not yet deployed to perp/hedge)
         total += int256(_readSpotUsdcBalance(account));
@@ -177,9 +177,9 @@ contract MonetrixAccountant is IMonetrixAccountant, MonetrixGovernedUpgradeable 
         return signed > 0 ? uint256(signed) : 0;
     }
 
-    function surplus() public view returns (int256) {
-        return totalBackingSigned() - int256(usdm.totalSupply());
-    }
+    function surplus() public view returns (int256) {//Protocol এ profit (বা loss) calculate করা
+        return totalBackingSigned() - int256(usdm.totalSupply());//surplus = total assets - total liabilities,,assets = 1200 supply = 1000 surplus = +200  👉 profit
+    }//*Done
 
     /// @notice Yield-declarable surplus. Subtracts pending redemption shortfall
     ///         from `surplus()` so `usdm.burn` at request time cannot inflate a
