@@ -114,12 +114,12 @@ contract MonetrixAccountant is IMonetrixAccountant, MonetrixGovernedUpgradeable 
     /// @notice Signed per-USDM backing. YieldEscrow (in-transit yield) and
     ///         InsuranceFund (ring-fenced reserve) are excluded by design.
     /// @dev Mark-to-market; signed so a liquidated perp account reduces backing.
-    function totalBackingSigned() public view returns (int256 total) {//👉 “Protocol এর total real value (EVM + L1)”
+    function totalBackingSigned() public view returns (int256 total) {//“Protocol এর কাছে মোট কত টাকা আছে?”
         // EVM USDC — Vault + RedeemEscrow (not YieldEscrow: undistributed yield is not backing)
-        total = int256(usdc.balanceOf(vault));//👉 Vault এ যত USDC আছে → add
-        address re = IMonetrixVaultReader(vault).redeemEscrow();
+        total = int256(usdc.balanceOf(vault));//👉 Vault এ যত USDC আছে → add ,, Vault = 200
+        address re = IMonetrixVaultReader(vault).redeemEscrow();//👉 users withdraw request করেছে, কিন্তু এখনো protocol-এর কাছেই আছে// Escrow = 300
         if (re != address(0)) {
-            total += int256(usdc.balanceOf(re));
+            total += int256(usdc.balanceOf(re));//Step 2: total = 500   (Vault + Escrow)
         }
 
         // L1 state — vault reads the Vault-side registry; multisigVault reads
@@ -134,41 +134,41 @@ contract MonetrixAccountant is IMonetrixAccountant, MonetrixGovernedUpgradeable 
         }
     }
 
-    /// @dev Sum perp + spot USDC + spot hedge tokens + supplied (registered) + HLP for a single L1 account.
-    function _readL1Backing(address account, SuppliedAsset[] storage suppliedList)
+    /// @dev Sum perp + spot USDC + spot hedge tokens + supplied (registered) + HLP for a single L1 account.//“L1 account-এ যত ধরনের asset আছে — সব যোগ করে total বের করো”
+    function _readL1Backing(address account, SuppliedAsset[] storage suppliedList)//L1 (trading side)-এ এই account-এর সব asset এর total value
         internal view returns (int256 total)
     {
-        total = _readPerpAccountValue Signed(account);
+        total = _readPerpAccountValueSigned(account);//L1 perp trading account-এর net value (profit / loss সহ),, Perp (trading PnL) = +200
 
         // L1 spot USDC (idle cash not yet deployed to perp/hedge)
-        total += int256(_readSpotUsdcBalance(account));
+        total += int256(_readSpotUsdcBalance(account));//Spot USDC = “wallet balance (unused cash)”,,L1 account-এ পড়ে থাকা free cash
 
         // Supplied (0x811) — iterate only registered slots; strict reads.
-        uint256 slen = suppliedList.length;
-        for (uint256 i = 0; i < slen; i++) {
+        uint256 slen = suppliedList.length;//👉 কয়টা asset supplied আছে,,👉 ধরো: 2টা (USDC + BTC)
+        for (uint256 i = 0; i < slen; i++) {//👉 এক এক করে সব asset process করবে,,suppliedList = [USDC, BTC]
             SuppliedAsset storage a = suppliedList[i];
             if (a.spotToken == uint64(HyperCoreConstants.USDC_TOKEN_INDEX)) {
-                total += int256(PrecompileReader.suppliedUsdcEvm(account));
-            } else {
+                total += int256(PrecompileReader.suppliedUsdcEvm(account));//Supplied (lending pool),,supplied USDC = 400
+            } else {//   👉 BTC → convert → USDC value,,BTC value = 100 USDC,, 👉 total += 100
                 total += int256(
-                    PrecompileReader.suppliedNotionalUsdcFromPerp(uint32(a.spotToken), a.perpIndex, account)
+                    PrecompileReader.suppliedNotionalUsdcFromPerp(uint32(a.spotToken), a.perpIndex, account)//🟢 1️⃣ a.spotToken example: BTC,, 🟢 2️⃣ a.perpIndex 👉 সেই asset-এর trading market index  example: BTC-PERP index = 3,,🟢 3️⃣ account 👉 কার account? (vault / multisig vault)//@audit-info  🧠 What Precompile does (core idea)👉 এটা L1 system থেকে value নিয়ে আসে:supplied asset amount × current market price
                 );
             }
         }
 
         // Spot hedge tokens (0x801) — unchanged; 0x801 returns 0 for unheld tokens rather than reverting.
-        if (config != address(0)) {
-            IMonetrixConfigReader cfg = IMonetrixConfigReader(config);
-            uint256 len = cfg.tradeableAssetsLength();
-            for (uint256 i = 0; i < len; i++) {
-                (uint32 perpIndex, uint32 spotIndex, ) = cfg.tradeableAssets(i);
-                total += int256(_readSpotAssetUsdc(spotIndex, perpIndex, account));
+        if (config != address(0)) {//👉 সব crypto asset (spot hedge) কে USDC value এ convert করে total এ যোগ করা হচ্ছে
+            IMonetrixConfigReader cfg = IMonetrixConfigReader(config);//👉 কতগুলো asset আছে (BTC, ETH, SOL etc.)
+            uint256 len = cfg.tradeableAssetsLength();//👉 কতগুলো asset আছে (BTC, ETH, SOL etc.)
+            for (uint256 i = 0; i < len; i++) {//👉 এক এক করে সব asset process
+                (uint32 perpIndex, uint32 spotIndex, ) = cfg.tradeableAssets(i);//“এই asset এর spot ID আর perp ID বের করো”,,BTC → perp=1, spot=101
+                total += int256(_readSpotAssetUsdc(spotIndex, perpIndex, account));//এই asset (BTC/ETH) এর value বের করো,,USDC value এ convert করো,,তারপর total এর সাথে যোগ করো
             }
         }
 
         // HLP equity counted at full mark value (no principal cap).
         // multisigVault-held HLP is recognized on the same basis as Vault-held HLP.
-        total += int256(_readHlpEquity(account));
+        total += int256(_readHlpEquity(account));//“এই account (Vault বা multisig) HLP pool-এ যত value আছে — সেটা বের করো”
     }
 
     /// @notice Unsigned view, clamped at 0. Internal math must use `totalBackingSigned()`.
@@ -321,9 +321,9 @@ contract MonetrixAccountant is IMonetrixAccountant, MonetrixGovernedUpgradeable 
     // EVM↔L1 unit conversions are owned by PrecompileReader itself — this
     // contract is pure aggregation logic.
 
-    function _readPerpAccountValueSigned(address user) internal view returns (int256) {
-        return int256(PrecompileReader.accountValueSigned(user));
-    }
+    function _readPerpAccountValueSigned(address user) internal view returns (int256) {//L1 perp trading account-এর net value (profit / loss সহ) //"L1 trading account এখন লাভে না ক্ষতিতে — সেই net value"
+        return int256(PrecompileReader.accountValueSigned(user));//L1 থেকে value read করে  ,,int256 এ convert করে return করে
+    }//*Done
 
     function _readSpotAssetUsdc(uint32 spotTokenIndex, uint32 perpIndex, address account)
         internal view returns (uint256)
@@ -335,9 +335,9 @@ contract MonetrixAccountant is IMonetrixAccountant, MonetrixGovernedUpgradeable 
         return PrecompileReader.spotUsdcEvm(account);
     }
 
-    function _readHlpEquity(address account) internal view returns (uint256) {
-        return uint256(PrecompileReader.vaultEquity(account, HyperCoreConstants.HLP_VAULT).equity);
-    }
+    function _readHlpEquity(address account) internal view returns (uint256) {//“এই account (Vault বা multisig) HLP-এ কত value আছে?”
+        return uint256(PrecompileReader.vaultEquity(account, HyperCoreConstants.HLP_VAULT).equity);//“L1 থেকে HLP-এ account-এর current value (profit সহ) এনে দাও”//Vault HLP-এ deposit করেছিল = 500,,এখন traders use করে value হয়েছে = 650
+    }//*Done
 
     function _currentDay() internal view returns (uint256) {
         return block.timestamp / 1 days;
