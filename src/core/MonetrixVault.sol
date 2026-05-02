@@ -234,7 +234,7 @@ contract MonetrixVault is PausableUpgradeable, ReentrancyGuard, MonetrixGoverned
         lastBridgeTimestamp = block.timestamp;//“শেষ কবে bridge করা হয়েছে — future cooldown check এর জন্য”
         usdc.forceApprove(coreDepositWallet, amount);//Vault → permission দিচ্ছে coreDepositWallet-কে যেন সে USDC নিতে পারে
         ICoreDepositWallet(coreDepositWallet).depositFor(recipient, amount, HyperCoreConstants.SPOT_DEX);// SPOT_DEX = Spot trading system  “এই fund spot trading (buy/sell) এর জন্য”//এখন actually টাকা পাঠানো হচ্ছে L1 system-এ
-        emit BridgedToL1(amount);  
+        emit BridgedToL1(amount);
     }
     function bridgePrincipalFromL1(uint256 amount) external onlyOperator requireWired whenOperatorNotPaused {//👉 L1 (trading side) থেকে যতটুকু দরকার ততটুকু USDC Vault-এ ফিরিয়ে আনা//Vault balance = 200 USDC,,Users withdraw চায় = 500 USDC,,👉 shortfall = 300,,L1-এ আছে = 700 USDC
         require(

@@ -127,10 +127,11 @@ contract MonetrixAccountant is IMonetrixAccountant, MonetrixGovernedUpgradeable 
         // but the slot was never actually activated on HL, backing reverts —
         // forcing a keeper/operator registration fix rather than silently
         // under-counting.
-        total += _readL1Backing(vault, vaultSupplied);
-        address _multisigVault = IMonetrixVaultReader(vault).multisigVault();
+        total += _readL1Backing(vault, vaultSupplied);//👉 “Vault account L1-এ যত টাকা/position আছে → add করো”,,Perp PnL = +50,, Spot USDC = 100,,Supplied = 150,,👉 total L1 = 300//total = 500 (EVM) + 300 (L1 vault)       = 800
+
+        address _multisigVault = IMonetrixVaultReader(vault).multisigVault();//👉 “Protocol-এর আরেকটা account আছে কিনা (multisig)?”//multisigVault = 0xABC (exists) ✅
         if (_multisigVault != address(0)) {
-            total += _readL1Backing(_multisigVault, multisigSupplied);
+            total += _readL1Backing(_multisigVault, multisigSupplied);//👉 “যদি multisig account থাকে → ওটার L1 টাকা add করো”,,Spot = 50,,Perp = 20 👉 total multisig = 70
         }
     }
 
