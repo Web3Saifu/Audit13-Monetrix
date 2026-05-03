@@ -531,10 +531,10 @@ contract MonetrixVault is PausableUpgradeable, ReentrancyGuard, MonetrixGoverned
     /// @dev Checks L1 USDC (spot + supplied when PM on) covers `amount` before SEND_ASSET; avoids silent L1 drop when hedge is still locked.
     function _sendL1Bridge(uint256 amount) internal {// ❗ এই function verify করে:,,“L1-এ সত্যি এই amount আছে তো?”
         uint64 usdcToken = uint64(HyperCoreConstants.USDC_TOKEN_INDEX);//“L1 system-এ USDC কোন token index-এ আছে সেটা নাও”,,এটা একটা constant value (library থেকে আসছে),,USDC_TOKEN_INDEX = 1;,,👉 এখানে token address use করে না
-        uint256 l1Available = uint256(PrecompileReader.spotBalance(address(this), usdcToken).total);//Vault-এর L1 account-এ direct USDC balance কত আছে,, Spot balance = 700 USDC//👉 “L1-এ আসলে enough USDC আছে কিনা check করে তারপর bridge করো”
+        uint256 l1Available = uint256(PrecompileReader.spotBalance(address(this), usdcToken).total);//Vault-এর L1 account-এ direct USDC balance কত আছে,, Spot balance = 700 USDC //👉 “L1-এ আসলে enough USDC আছে কিনা check করে তারপর bridge করো”
         if (pmEnabled) {//collateral count হবে কিনা 👉 যদি Portfolio Margin ON থাকে: ,,usable = spot + supplied,,usable = spot only,, //👉 না থাকলে:usable = spot only            //👉 suppliedBalance normally locked collateral
             l1Available += uint256(PrecompileReader.suppliedBalance(address(this), usdcToken));//✅ PM ON ->l1Available = 300 + 400 = 700
-        } 
+        }
         require(
             l1Available >= TokenMath.usdcEvmToL1Wei(amount),//👉 “তুমি যত amount bridge করতে চাও…”,, 👉 “L1-এ available amount ≥ সেই amount হতে হবে”
             "L1 USDC insufficient (unwind hedge or wait for settlement)"//“L1-এ enough free USDC নাই”

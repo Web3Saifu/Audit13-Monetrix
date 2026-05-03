@@ -49,7 +49,7 @@ contract RedeemEscrow is IRedeemEscrow, MonetrixGovernedUpgradeable {
         require(usdc.balanceOf(address(this)) >= amount, "RedeemEscrow: insufficient liquidity");
         totalOwed -= amount;//📉 “We owe less now”
         usdc.safeTransfer(recipient, amount);//👤 the person who will receive USDC
-        emit PaidOut(recipient, amount);
+        emit PaidOut(recipient, amount);  
     }//*Done 
 
     /// @notice Reclaim excess USDC back to a target address (typically vault).
@@ -63,6 +63,7 @@ contract RedeemEscrow is IRedeemEscrow, MonetrixGovernedUpgradeable {
         usdc.safeTransfer(to, amount);
         emit Reclaimed(to, amount);
     }
+
 
     function shortfall() external view returns (uint256) {//This function calculates how much USDC is missing to pay users.
         uint256 bal = usdc.balanceOf(address(this));//👉 How much USDC is currently available
