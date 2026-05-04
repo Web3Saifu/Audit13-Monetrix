@@ -119,7 +119,7 @@ contract MonetrixAccountant is IMonetrixAccountant, MonetrixGovernedUpgradeable 
         total = int256(usdc.balanceOf(vault));//👉 Vault এ যত USDC আছে → add ,, Vault = 200
         address re = IMonetrixVaultReader(vault).redeemEscrow();//👉 users withdraw request করেছে, কিন্তু এখনো protocol-এর কাছেই আছে// Escrow = 300
         if (re != address(0)) {
-            total += int256(usdc.balanceOf(re));//Step 2: total = 500   (Vault + Escrow)
+            total += int256(usdc.balanceOf(re));//Step 2: total = 500   (Vault + Escrow) 
         }
 
         // L1 state — vault reads the Vault-side registry; multisigVault reads

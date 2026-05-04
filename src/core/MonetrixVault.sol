@@ -244,7 +244,7 @@ contract MonetrixVault is PausableUpgradeable, ReentrancyGuard, MonetrixGoverned
         outstandingL1Principal -= amount;//“L1-এ এখন কম টাকা আছে”
         _sendL1Bridge(amount);//L1 system → Vault-এ USDC পাঠায়
         emit PrincipalBridgedFromL1(amount);
-    }//*Done
+    }//*Done 
 
     function bridgeYieldFromL1(uint256 amount) external onlyOperator requireWired whenOperatorNotPaused {//Bring profit (yield) from L1 → back to vault (EVM).
         require(amount > 0, "zero amount");
